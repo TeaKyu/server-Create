@@ -3,3 +3,4 @@
 3. Jenkins 관리 - Credentials
      docker_password > 도커허브 로그인 패스워드
      k8s_config > k8s 인증서 
+4. Jenkinsfile -> 파이프라인 잰킨스 파일
