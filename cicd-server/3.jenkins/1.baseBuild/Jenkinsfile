@@ -1,5 +1,9 @@
 pipeline {
+<<<<<<< HEAD
     agent any 
+=======
+    agent any
+>>>>>>> 3e9be90161fa6c5651ed3b6fb5f53a5989cbdd79
 
     tools {
         gradle 'gradle8.12'
