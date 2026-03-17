@@ -39,7 +39,10 @@ RUN apt-get update && apt-get install -y \
 RUN groupadd -g 989 docker && usermod -aG docker jenkins
 
 # 이전 Jenkins 설정 복원
-
+#COPY jenkins_config.tar.gz /tmp/jenkins_config.tar.gz
+#RUN tar xzf /tmp/jenkins_config.tar.gz -C /var/jenkins_home \
+#    && rm /tmp/jenkins_config.tar.gz \
+#    && chown -R jenkins:jenkins /var/jenkins_home
 
 # 4. 보안을 위해 다시 jenkins 사용자로 전환
 USER jenkins
