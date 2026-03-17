@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y \
  && rm -rf /var/lib/apt/lists/*
 
 # docker 그룹 생성 및 jenkins 유저 추가 (GID는 호스트의 docker GID와 맞출 것)
-RUN groupadd -g 999 docker && usermod -aG docker jenkins
+RUN groupadd -g 989 docker && usermod -aG docker jenkins
 
 # 4. 보안을 위해 다시 jenkins 사용자로 전환
 USER jenkins
