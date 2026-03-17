@@ -26,7 +26,10 @@ RUN apt-get update && apt-get install -y \
  && curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" \
  && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
 # Helm 설치
-# && curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash \
+ && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get_helm.sh \
+ && chmod +x /tmp/get_helm.sh \
+ && /tmp/get_helm.sh \
+ && rm /tmp/get_helm.sh \
 # 정리 작업
  && rm kubectl \
  && apt-get clean \
@@ -34,6 +37,12 @@ RUN apt-get update && apt-get install -y \
 
 # docker 그룹 생성 및 jenkins 유저 추가 (GID는 호스트의 docker GID와 맞출 것)
 RUN groupadd -g 989 docker && usermod -aG docker jenkins
+
+# 이전 Jenkins 설정 복원
+#COPY jenkins_config.tar.gz /tmp/jenkins_config.tar.gz
+#RUN tar xzf /tmp/jenkins_config.tar.gz -C /var/jenkins_home \
+#    && rm /tmp/jenkins_config.tar.gz \
+#    && chown -R jenkins:jenkins /var/jenkins_home
 
 # 4. 보안을 위해 다시 jenkins 사용자로 전환
 USER jenkins
