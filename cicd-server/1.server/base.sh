@@ -34,7 +34,7 @@ systemctl enable --now docker
 ## ============= 기본설정 END ==============
 
 # 도커 이미지 빌드
-docker build -t jenkins .
+docker build -t my-jenkins .
 
 # 도커 이미지 띄우기
 #docker run -d -p 8080:8080 -p 50000:50000 -v /var/run/docker.sock:/var/run/docker.sock --name jenkins 0fb 
