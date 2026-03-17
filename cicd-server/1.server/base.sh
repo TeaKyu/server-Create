@@ -33,12 +33,8 @@ systemctl enable --now docker
 
 ## ============= 기본설정 END ==============
 
-# 도커 권한 주기
-chmod 666 /var/run/docker.sock
-usermod -aG docker jenkins
-
 # 도커 이미지 빌드
-docker build -t my-jenkins .
+docker build -t jenkins .
 
 # 도커 이미지 띄우기
 #docker run -d -p 8080:8080 -p 50000:50000 -v /var/run/docker.sock:/var/run/docker.sock --name jenkins 0fb 
@@ -48,3 +44,10 @@ docker run -d --name jenkins \
   -v jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
   my-jenkins:1.0
+
+
+# 도커 권한 주기
+chmod 666 /var/run/docker.sock
+usermod -aG docker jenkins
+
+
