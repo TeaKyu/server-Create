@@ -13,6 +13,8 @@ pipeline {
     }
 
     environment {
+	DOCKER_API_VERSION = '1.42'
+
         // 본인의 username으로 값을 넣어 주세요.
         //DOCKERHUB_USERNAME = "tk0224"
         //GITHUB_USERNAME = "TeaKyu"
