@@ -51,3 +51,10 @@ docker run -d --name my-jenkins \
 # usermod -aG docker jenkins
 
 
+# jenkins 초기 비밀번호 확인
+docker exec my-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+
+
+
+
+
