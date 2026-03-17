@@ -38,20 +38,22 @@ pipeline {
         }
 
         stage('Container Build') {
-            steps {	
+            steps { 
                 // 릴리즈파일 체크아웃
                 checkout scmGit(branches: [[name: '*/main']], 
                     extensions: [[$class: 'SparseCheckoutPaths', 
                     sparseCheckoutPaths: [[path: "/${CLASS_NUM}"]]]], 
                     userRemoteConfigs: [[url: "${GITHUB_URL}"]])
-
                 // jar 파일 복사
                 sh "cp ./build/libs/app-0.0.1-SNAPSHOT.jar ./${CLASS_NUM}/build/docker/app-0.0.1-SNAPSHOT.jar"
-
-                // 컨테이너 빌드 및 업로드
+                // 컨테이너 빌드
                 sh "docker build -t ${DOCKERHUB_USERNAME}/api-tester:v1.0.0 ./${CLASS_NUM}/build/docker"
-                // 영상과 달리 if문이 없어지고 항상 본인의 Docker Hub에서 빌드가 되도록 수정 됨
-                sh "docker push ${DOCKERHUB_USERNAME}/api-tester:v1.0.0"
+                // Docker Hub 로그인 및 업로드
+                withCredentials([usernamePassword(credentialsId: 'docker_password', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${DOCKERHUB_USERNAME}/api-tester:v1.0.0"
+                    sh 'docker logout'
+                }
             }
         }
 
