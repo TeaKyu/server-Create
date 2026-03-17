@@ -50,11 +50,10 @@ docker run -d --name my-jenkins \
 # chmod 666 /var/run/docker.sock
 # usermod -aG docker jenkins
 
-
+# jenkins 로그인
+#http://{ip}:8081/   
 # jenkins 초기 비밀번호 확인
 docker exec my-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 
-
-
-
+# 이후 관리 -> Tools -> jdk, Gradle, 
 
