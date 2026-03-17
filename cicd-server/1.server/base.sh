@@ -43,7 +43,7 @@ docker run -d --name my-jenkins \
   -p 50000:50000 \
   -v jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  my-jenkins:1.0
+  my-jenkins
 
 
 # 도커 권한 주기
