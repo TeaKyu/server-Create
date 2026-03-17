@@ -54,6 +54,8 @@ pipeline {
                     sh "docker push ${DOCKERHUB_USERNAME}/api-tester:v1.0.0"
                     sh 'docker logout'
                 }
+                // 빌드 후 이미지 삭제
+                sh "docker rmi ${DOCKERHUB_USERNAME}/api-tester:v1.0.0"
             }
         }
 

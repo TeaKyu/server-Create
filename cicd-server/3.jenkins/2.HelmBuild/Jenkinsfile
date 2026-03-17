@@ -7,15 +7,15 @@ pipeline {
     }
     
     parameters {
-        string(name: 'DOCKERHUB_USERNAME',  defaultValue: '', description: 'DockerHub 사용자명을 입력하세요.')
+        //string(name: 'DOCKERHUB_USERNAME',  defaultValue: '', description: 'DockerHub 사용자명을 입력하세요.')
         // GitHub  사용자명 입력
-        string(name: 'GITHUB_USERNAME',  defaultValue: '', description: 'GitHub  사용자명을 입력하세요.')
+        //string(name: 'GITHUB_USERNAME',  defaultValue: '', description: 'GitHub  사용자명을 입력하세요.')
     }
 
     environment {
         // 본인의 username으로 값을 넣어 주세요.
-        //DOCKERHUB_USERNAME = "tk0224"
-        //GITHUB_USERNAME = "TeaKyu"
+        DOCKERHUB_USERNAME = "tk0224"
+        GITHUB_USERNAME = "TeaKyu"
 
         // 아래 부분 수정(x)
         GITHUB_URL = "https://github.com/${GITHUB_USERNAME}/kubernetes-anotherclass-sprint2.git"
