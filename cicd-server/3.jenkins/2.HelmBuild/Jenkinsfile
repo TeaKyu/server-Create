@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+
+    tools {
+        gradle 'gradle8.12'
+        jdk 'openjdk21'
+    }
+    
+    parameters {
+        string(name: 'DOCKERHUB_USERNAME',  defaultValue: '', description: 'DockerHub 사용자명을 입력하세요.')
+        // GitHub  사용자명 입력
+        string(name: 'GITHUB_USERNAME',  defaultValue: '', description: 'GitHub  사용자명을 입력하세요.')
+    }
+
+    environment {
+        // 본인의 username으로 값을 넣어 주세요.
+        //DOCKERHUB_USERNAME = "tk0224"
+        //GITHUB_USERNAME = "TeaKyu"
+
+        // 아래 부분 수정(x)
+        GITHUB_URL = "https://github.com/${GITHUB_USERNAME}/kubernetes-anotherclass-sprint2.git"
+        CLASS_NUM = '2211'
+    }
+
+    stages {
+        stage('Source Build') {
+            steps {
+                // 소스파일 체크아웃 (Source Repo는 변경없이 그대로 사용)
+                git branch: 'main', url: 'https://github.com/k8s-1pro/kubernetes-anotherclass-api-tester.git'
+
+                // 소스 빌드
+                // 755권한 필요 (윈도우에서 Git으로 소스 업로드시 권한은 644)
+                sh "chmod +x ./gradlew"
+                sh "gradle clean build"
+            }
+        }
+
+        stage('Container Build') {
+            steps {	
+                // 릴리즈파일 체크아웃
+                checkout scmGit(branches: [[name: '*/main']], 
+                    extensions: [[$class: 'SparseCheckoutPaths', 
+                    sparseCheckoutPaths: [[path: "/${CLASS_NUM}"]]]], 
+                    userRemoteConfigs: [[url: "${GITHUB_URL}"]])
+
+                // jar 파일 복사
+                sh "cp ./build/libs/app-0.0.1-SNAPSHOT.jar ./${CLASS_NUM}/build/docker/app-0.0.1-SNAPSHOT.jar"
+
+                // 컨테이너 빌드 및 업로드
+                sh "docker build -t ${DOCKERHUB_USERNAME}/api-tester:v1.0.0 ./${CLASS_NUM}/build/docker"
+                // 영상과 달리 if문이 없어지고 항상 본인의 Docker Hub에서 빌드가 되도록 수정 됨
+                sh "docker push ${DOCKERHUB_USERNAME}/api-tester:v1.0.0"
+            }
+        }
+
+        stage('K8S Deploy') {
+            steps {
+                // 쿠버네티스 배포 
+                sh "kubectl apply -f ./${CLASS_NUM}/deploy/k8s/namespace.yaml"
+				sh "kubectl apply -f ./${CLASS_NUM}/deploy/k8s/configmap.yaml"
+				sh "kubectl apply -f ./${CLASS_NUM}/deploy/k8s/secret.yaml"
+				sh "kubectl apply -f ./${CLASS_NUM}/deploy/k8s/service.yaml"
+				sh "kubectl apply -f ./${CLASS_NUM}/deploy/k8s/deployment.yaml"
+            }
+        }
+    }
+}
