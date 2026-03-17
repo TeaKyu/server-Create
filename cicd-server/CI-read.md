@@ -21,12 +21,3 @@ docker exec jenkins tar czf /tmp/jenkins_config.tar.gz \
 # 호스트로 복사
 docker cp jenkins:/tmp/jenkins_config.tar.gz ./jenkins_config.tar.gz
 
-
-
-# 이후에 도커파일이 해당 라인 추가
-
-# 이전 Jenkins 설정 복원
-COPY jenkins_config.tar.gz /tmp/jenkins_config.tar.gz
-RUN tar xzf /tmp/jenkins_config.tar.gz -C /var/jenkins_home \
-    && rm /tmp/jenkins_config.tar.gz \
-    && chown -R jenkins:jenkins /var/jenkins_home
