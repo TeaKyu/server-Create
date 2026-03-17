@@ -46,8 +46,8 @@ docker run -d --name my-jenkins \
   my-jenkins
 
 
-# 도커 권한 주기
-chmod 666 /var/run/docker.sock
-usermod -aG docker jenkins
+# 도커 권한 주기  -> Dockerfile 에 RUN에 정의가 되어있음
+# chmod 666 /var/run/docker.sock
+# usermod -aG docker jenkins
 
 
