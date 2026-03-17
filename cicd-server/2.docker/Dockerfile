@@ -40,7 +40,7 @@ USER jenkins
 
 # 5. (선택) 젠킨스 플러그인 자동 설치
 # RUN jenkins-plugin-cli --plugins "blueocean docker-workflow kubernetes"
-# 5. 젠킨스 플러그인 자동 설치
+# 노드 설치
 RUN jenkins-plugin-cli --plugins \
     nodejs \
     docker-workflow \
