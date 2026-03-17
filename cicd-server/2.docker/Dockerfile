@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
 # Infisical CLI 설치
- && curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
- && apt-get install -y infisical \
+# && curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
+# && apt-get install -y infisical \
 # Docker CLI 설치
  && mkdir -p /usr/share/keyrings \
  && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
  && curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" \
  && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
 # Helm 설치
- && curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash \
+# && curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash \
 # 정리 작업
  && rm kubectl \
  && apt-get clean \
