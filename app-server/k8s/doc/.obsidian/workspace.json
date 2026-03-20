@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "04-서비스-접속-가이드.md",
+                "file": "05-컴포넌트별-사용법-가이드.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "04-서비스-접속-가이드"
+              "title": "05-컴포넌트별-사용법-가이드"
             }
           },
           {
@@ -108,7 +108,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "04-서비스-접속-가이드.md",
+                "file": "05-컴포넌트별-사용법-가이드.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -118,7 +118,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "04-서비스-접속-가이드 의 백링크"
+              "title": "05-컴포넌트별-사용법-가이드 의 백링크"
             }
           },
           {
@@ -127,12 +127,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "04-서비스-접속-가이드.md",
+                "file": "05-컴포넌트별-사용법-가이드.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "04-서비스-접속-가이드 의 나가는 링크"
+              "title": "05-컴포넌트별-사용법-가이드 의 나가는 링크"
             }
           },
           {
@@ -170,13 +170,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "04-서비스-접속-가이드.md",
+                "file": "05-컴포넌트별-사용법-가이드.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "04-서비스-접속-가이드 의 개요"
+              "title": "05-컴포넌트별-사용법-가이드 의 개요"
             }
           }
         ]
@@ -199,7 +199,7 @@
   },
   "active": "994cf0c5dc389b3c",
   "lastOpenFiles": [
-    "05-컴포넌트별-사용법-가이드.md",
-    "04-서비스-접속-가이드.md"
+    "04-서비스-접속-가이드.md",
+    "05-컴포넌트별-사용법-가이드.md"
   ]
 }
