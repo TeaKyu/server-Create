@@ -111,10 +111,23 @@ EOF
 
 echo '======== [10] Headlamp (클러스터 웹 UI) 설치 ========'
 # Kubernetes Dashboard는 2026년 1월 아카이브됨 → 공식 후속 도구 Headlamp 사용
+# 차트 0.40.x에서 -session-ttl 플래그 호환 문제 있어 설치 후 패치 필요
 helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/
 helm repo update
 helm upgrade --install headlamp headlamp/headlamp \
-  --create-namespace --namespace headlamp
+  --create-namespace --namespace headlamp \
+  --set image.tag="v0.40.1"
+
+echo '======== [10-1] Headlamp -session-ttl 호환 패치 ========'
+# 차트가 -session-ttl 플래그를 주입하지만 이미지가 미지원 → 해당 arg 제거
+kubectl -n headlamp patch deployment headlamp --type='json' -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [
+    "-in-cluster",
+    "-in-cluster-context-name=main",
+    "-plugins-dir=/headlamp/plugins"
+  ]}
+]'
+kubectl rollout status deployment headlamp -n headlamp --timeout=120s
 
 echo '======== [10-1] Headlamp Admin 계정 생성 ========'
 cat <<EOF | kubectl apply -f -
