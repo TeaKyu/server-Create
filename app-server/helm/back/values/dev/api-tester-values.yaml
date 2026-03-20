@@ -5,10 +5,10 @@
 replicaCount: 2
 
 image:
-  repository: 1pro/api-tester
+  repository: tk0224/api-tester
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+  tag: "1.1.1-260318.151626"
 
 imagePullSecrets: []
 nameOverride: ""

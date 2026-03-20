@@ -6,10 +6,16 @@
 4. Jenkinsfile -> 파이프라인 잰킨스 파일
 
 
+# ===== 도커 컨테이너 실행
+docker run -d --name my-jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  my-jenkins
+
 
 # ======== 이전 도커설정 복원 하려면 =====
 # 컨테이너에서 설정 tar 생성 (workspace, logs 등 불필요한 것 제외)
-docker exec jenkins tar czf /tmp/jenkins_config.tar.gz \
+docker exec my-jenkins tar czf /tmp/jenkins_config.tar.gz \
   -C /var/jenkins_home \
   --exclude='workspace' \
   --exclude='caches' \
