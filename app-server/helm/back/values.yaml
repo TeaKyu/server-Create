@@ -1,8 +1,8 @@
 # values.yaml (빈 기본값 — 환경별 values 파일이 오버라이드)
 replicaCount: 1
 image:
-  repository: tk0224/api-tester
-  pullPolicy: IfNotPresent
+  repository: ""
+  pullPolicy: ""
   tag: ""
 imagePullSecrets: []
 nameOverride: ""
