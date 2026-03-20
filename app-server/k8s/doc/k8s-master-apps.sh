@@ -129,27 +129,10 @@ kubectl -n headlamp patch deployment headlamp --type='json' -p='[
 ]'
 kubectl rollout status deployment headlamp -n headlamp --timeout=120s
 
-echo '======== [10-1] Headlamp Admin 계정 생성 ========'
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: headlamp-admin
-  namespace: headlamp
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: headlamp-admin
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: headlamp-admin
-  namespace: headlamp
-EOF
+echo '======== [10-2] Headlamp 권한 확인 ========'
+# Helm 차트가 headlamp SA + cluster-admin ClusterRoleBinding을 자동 생성합니다.
+# 별도 ServiceAccount 생성이 필요 없습니다.
+# 토큰 생성: kubectl -n headlamp create token headlamp
 
 
 echo '======== [11] kube-prometheus-stack (Prometheus + Grafana) 설치 ========'
@@ -161,13 +144,83 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   --set prometheus.prometheusSpec.retention=7d
 
 
-echo '======== [12] Loki + Promtail (로깅) 설치 ========'
+echo '======== [12] Loki (로그 저장소) 설치 — SingleBinary + filesystem ========'
+# loki-stack(deprecated) 대신 공식 loki 차트 사용
+# SingleBinary 모드 + filesystem 스토리지 + emptyDir (학습 환경)
+# 운영 환경에서는 S3/GCS 등 오브젝트 스토리지로 교체
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
-helm upgrade --install loki grafana/loki-stack \
+helm upgrade --install loki grafana/loki \
   --create-namespace --namespace logging \
-  --set promtail.enabled=true \
-  --set loki.persistence.enabled=false
+  --set deploymentMode=SingleBinary \
+  --set loki.commonConfig.replication_factor=1 \
+  --set loki.storage.type=filesystem \
+  --set loki.useTestSchema=true \
+  --set loki.auth_enabled=false \
+  --set loki.rulerConfig.storage.type=local \
+  --set singleBinary.replicas=1 \
+  --set singleBinary.persistence.enabled=false \
+  --set minio.enabled=false \
+  --set backend.replicas=0 \
+  --set read.replicas=0 \
+  --set write.replicas=0 \
+  --set ingester.replicas=0 \
+  --set querier.replicas=0 \
+  --set queryFrontend.replicas=0 \
+  --set queryScheduler.replicas=0 \
+  --set distributor.replicas=0 \
+  --set compactor.replicas=0 \
+  --set indexGateway.replicas=0 \
+  --set bloomCompactor.replicas=0 \
+  --set bloomGateway.replicas=0 \
+  --set chunksCache.enabled=false \
+  --set resultsCache.enabled=false \
+  --set singleBinary.extraVolumes[0].name=data \
+  --set singleBinary.extraVolumes[0].emptyDir.sizeLimit=5Gi \
+  --set singleBinary.extraVolumeMounts[0].name=data \
+  --set singleBinary.extraVolumeMounts[0].mountPath=/var/loki
+
+echo '======== [12-1] Grafana Alloy (로그 수집 에이전트) 설치 ========'
+# Promtail(EOL 2026-03-02) 대신 공식 후속 도구 Alloy 사용
+helm upgrade --install alloy grafana/alloy \
+  --namespace logging \
+  --set alloy.configMap.content='
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.kubernetes "pods" {
+  role = "pod"
+}
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+}
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.write.endpoint.receiver]
+}
+
+loki.write "endpoint" {
+  endpoint {
+    url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
+  }
+}
+'
 
 
 echo '======== [13] Sealed Secrets (GitOps Secret 암호화) 설치 ========'
@@ -345,11 +398,11 @@ echo '      kubectl -n argocd get secret argocd-initial-admin-secret \'
 echo '        -o jsonpath="{.data.password}" | base64 -d; echo'
 echo ''
 echo '  [4] Headlamp 로그인 토큰'
-echo '      kubectl -n headlamp create token headlamp-admin'
+echo '      kubectl -n headlamp create token headlamp'
 echo ''
 echo '  [5] Grafana에서 Loki 데이터소스 추가'
 echo '      Connections → Data Sources → Add → Loki'
-echo '      URL: http://loki.logging.svc.cluster.local:3100'
+echo '      URL: http://loki-gateway.logging.svc.cluster.local'
 echo ''
 echo '  [6] HTTPRoute 상태 확인'
 echo '      kubectl get httproute'
