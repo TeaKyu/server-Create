@@ -5,18 +5,66 @@
 # 사용법: sudo bash k3s-apps.sh
 
 set -e
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │              ★ 설정 구간 — 여기만 수정하세요 ★               │
+# └─────────────────────────────────────────────────────────────┘
+
+# ─── [일반 서버] MetalLB IP 풀 ───────────────────────────────
+# IS_OCI=false 일 때만 사용. 서버 서브넷의 미사용 IP 대역 입력.
+# DHCP 범위, 서버 IP와 겹치지 않아야 함.
+METALLB_IP_START="192.168.1.200"   # ← 환경에 맞게 변경
+METALLB_IP_END="192.168.1.220"     # ← 환경에 맞게 변경
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │              ★ 설정 끝 — 아래는 수정하지 마세요 ★            │
+# └─────────────────────────────────────────────────────────────┘
+
+# ============================================================
+# 버전 고정 (호환성 검증 완료)
+# ┌────────────────────────────────────────────────────────────┐
+# │ Envoy Gateway   v1.7.1  (2026-03-12 최신)                  │
+# │ Headlamp        v0.41.0 (2026-03-26 최신)                  │
+# │ Loki chart      6.29.0  ← Grafana 11.x 호환 확인 버전      │
+# │   * 6.30+ 부터 schema 정책 변경으로 useTestSchema 불필요    │
+# │   * kube-prometheus-stack 내장 Grafana 11.x 와 호환        │
+# │ kube-prometheus-stack  최신 (버전 고정 안 함)               │
+# │   → Loki와 재설치 시 Grafana 버전이 맞춰짐                  │
+# └────────────────────────────────────────────────────────────┘
+ENVOY_GATEWAY_VERSION="v1.7.1"
+HEADLAMP_VERSION="v0.41.0"
+LOKI_CHART_VERSION="6.29.0"
+ARGOCD_IMAGE_UPDATER_VERSION="0.14.0"
+
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export PATH=$PATH:/usr/local/bin
 
 # ============================================================
-# 환경 변수 (서버 환경에 맞게 수정)
+# 환경 변수 로드 (k3s-common.sh에서 생성한 /etc/k3s-env 사용)
 # ============================================================
-METALLB_IP_START="192.168.1.200"
-METALLB_IP_END="192.168.1.220"
+if [ -f /etc/k3s-env ]; then
+  source /etc/k3s-env
+else
+  echo '[오류] /etc/k3s-env 파일이 없습니다. k3s-common.sh를 먼저 실행하세요.'
+  exit 1
+fi
+
+if [ "$IS_OCI" = true ]; then
+  # ┌─────────────────────────────────────────────────────────┐
+  # │ [OCI 전용] MetalLB 미사용                               │
+  # │  OCI Free Tier는 외부 LB가 없으므로                     │
+  # │  MetalLB → NodePort + Public IP 직접 접근으로 대체      │
+  # │  Envoy Gateway 서비스를 NodePort 30080으로 패치함        │
+  # └─────────────────────────────────────────────────────────┘
+  echo "  [OCI] Private IP: $PRIVATE_IP"
+  echo "  [OCI] Public IP:  $PUBLIC_IP"
+  echo "  [OCI] 접속: http://<도메인>:30080"
+  echo ''
+fi
 
 
 echo '======== 노드 상태 확인 ========'
-kubectl get nodes
+kubectl get nodes -o wide
 echo ''
 
 
@@ -25,20 +73,28 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 helm version
 
 
-echo '======== [2] MetalLB 설치 (온프레미스 LoadBalancer) ========'
-helm repo add metallb https://metallb.github.io/metallb
-helm repo update
-helm upgrade --install metallb metallb/metallb \
-  --create-namespace --namespace metallb-system \
-  --wait --timeout 600s
+# ============================================================
+# [2] LoadBalancer 구성 (환경별 분기)
+# ============================================================
+if [ "$IS_OCI" = false ]; then
+  # ─────────────────────────────────────────────────────────────
+  # [일반 서버] MetalLB 설치 — 온프레미스 LoadBalancer
+  #   Envoy Gateway가 External IP를 받으려면 MetalLB가 필요
+  # ─────────────────────────────────────────────────────────────
+  echo '======== [2] MetalLB 설치 (온프레미스 LoadBalancer) ========'
+  helm repo add metallb https://metallb.github.io/metallb
+  helm repo update
+  helm upgrade --install metallb metallb/metallb \
+    --create-namespace --namespace metallb-system \
+    --wait --timeout 600s
 
-echo '======== [2-1] MetalLB IP Pool 설정 ========'
-kubectl wait --namespace metallb-system \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/name=metallb \
-  --timeout=600s
+  echo '======== [2-1] MetalLB IP Pool 설정 ========'
+  kubectl wait --namespace metallb-system \
+    --for=condition=ready pod \
+    --selector=app.kubernetes.io/name=metallb \
+    --timeout=600s
 
-cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -f -
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -58,10 +114,21 @@ spec:
   - default-pool
 EOF
 
+else
+  # ┌─────────────────────────────────────────────────────────┐
+  # │ [OCI 전용] MetalLB 설치 건너뜀                           │
+  # │  OCI Free Tier는 실제 외부 LB와 연동 불가               │
+  # │  → Envoy Gateway를 NodePort로 직접 노출                 │
+  # └─────────────────────────────────────────────────────────┘
+  echo '======== [2] [OCI] MetalLB 건너뜀 → NodePort 방식 사용 ========'
+  echo '  OCI Free Tier는 외부 LB 연동이 없으므로 NodePort를 사용합니다.'
+fi
 
-echo '======== [3] Envoy Gateway (Gateway API) 설치 ========'
+
+echo "======== [3] Envoy Gateway (Gateway API) 설치 — ${ENVOY_GATEWAY_VERSION} ========"
+# OCI 레지스트리에서 직접 설치 — helm repo add/update 불필요
 helm install eg oci://docker.io/envoyproxy/gateway-helm \
-  --version v1.7.1 \
+  --version ${ENVOY_GATEWAY_VERSION} \
   -n envoy-gateway-system \
   --create-namespace
 
@@ -94,6 +161,35 @@ spec:
         from: All
 EOF
 
+if [ "$IS_OCI" = true ]; then
+  # ┌─────────────────────────────────────────────────────────┐
+  # │ [OCI 전용] Envoy Gateway 서비스 → NodePort 패치          │
+  # │                                                         │
+  # │  흐름: 외부 브라우저                                     │
+  # │         → OCI Public IP:30080                           │
+  # │         → OCI NAT                                       │
+  # │         → Private IP:30080 (NodePort)                   │
+  # │         → Envoy Gateway Pod                             │
+  # │         → HTTPRoute → 서비스 → Pod                      │
+  # └─────────────────────────────────────────────────────────┘
+  echo '======== [3-3] [OCI] Envoy Gateway → NodePort 30080 패치 ========'
+  sleep 15  # envoy 서비스 생성 대기
+  ENVOY_SVC=$(kubectl get svc -n envoy-gateway-system \
+    -l gateway.envoyproxy.io/owning-gateway-name=eg \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+
+  if [ -n "$ENVOY_SVC" ]; then
+    kubectl patch svc "$ENVOY_SVC" -n envoy-gateway-system --type merge \
+      -p '{"spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30080,"protocol":"TCP"}]}}'
+    echo "  ✓ Envoy Service ($ENVOY_SVC) → NodePort 30080 패치 완료"
+  else
+    echo '  [경고] Envoy 서비스를 찾지 못했습니다. 수동 패치 필요:'
+    echo '  kubectl get svc -n envoy-gateway-system'
+    echo '  kubectl patch svc <svc-name> -n envoy-gateway-system --type merge \'
+    echo '    -p '"'"'{"spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30080,"protocol":"TCP"}]}}'"'"
+  fi
+fi
+
 
 echo '======== [4] cert-manager 설치 ========'
 helm repo add jetstack https://charts.jetstack.io
@@ -113,14 +209,20 @@ spec:
 EOF
 
 
-echo '======== [5] Headlamp (클러스터 웹 UI) 설치 ========'
+echo "======== [5] Headlamp (클러스터 웹 UI) 설치 — ${HEADLAMP_VERSION} ========"
 helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/
 helm repo update
 helm upgrade --install headlamp headlamp/headlamp \
   --create-namespace --namespace headlamp \
-  --set image.tag="v0.40.1"
+  --set image.tag="${HEADLAMP_VERSION}"
 
-echo '======== [5-1] Headlamp -session-ttl 호환 패치 ========'
+# ┌─────────────────────────────────────────────────────────────┐
+# │ v0.41.0 부터 -session-ttl 플래그가 정식 지원되므로           │
+# │ 기존 args 패치(강제 교체)가 불필요해졌습니다.                │
+# │ 단, -in-cluster-context-name 커스터마이징은 유지합니다.      │
+# └─────────────────────────────────────────────────────────────┘
+echo '======== [5-1] Headlamp in-cluster-context-name 패치 ========'
+kubectl rollout status deployment headlamp -n headlamp --timeout=180s
 kubectl -n headlamp patch deployment headlamp --type='json' -p='[
   {"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [
     "-in-cluster",
@@ -134,16 +236,29 @@ kubectl rollout status deployment headlamp -n headlamp --timeout=120s
 echo '======== [6] kube-prometheus-stack (Prometheus + Grafana) 설치 ========'
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 버전 미지정 → 최신(현재 82.x) 설치                          │
+# │ 내장 Grafana: 11.x                                          │
+# │ Loki chart 6.29.0 과 Grafana 11.x 호환 확인됨               │
+# └─────────────────────────────────────────────────────────────┘
 helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --create-namespace --namespace monitoring \
   --set grafana.adminPassword=admin1234 \
-  --set prometheus.prometheusSpec.retention=7d
+  --set prometheus.prometheusSpec.retention=7d \
+  --wait --timeout 600s
 
 
-echo '======== [7] Loki (로그 저장소) 설치 — SingleBinary + filesystem ========'
+echo "======== [7] Loki (로그 저장소) 설치 — chart ${LOKI_CHART_VERSION} / SingleBinary + filesystem ========"
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 버전 고정 이유: Grafana 11.x 와 호환 확인된 버전            │
+# │   - 6.30+ 부터 internal schema 정책 변경                    │
+# │   - 6.29.x 는 useTestSchema / rulerConfig 옵션 정상 동작    │
+# │ Loki app version: 3.3.x                                     │
+# └─────────────────────────────────────────────────────────────┘
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
 helm upgrade --install loki grafana/loki \
+  --version ${LOKI_CHART_VERSION} \
   --create-namespace --namespace logging \
   --set deploymentMode=SingleBinary \
   --set loki.commonConfig.replication_factor=1 \
@@ -214,6 +329,32 @@ loki.write "endpoint" {
 }
 '
 
+echo '======== [7-2] Loki 데이터소스 Grafana에 자동 프로비저닝 ========'
+# ┌─────────────────────────────────────────────────────────────┐
+# │ Grafana UI에서 수동 추가 대신 ConfigMap으로 자동 등록        │
+# │ kube-prometheus-stack의 grafana sidecar가 감지해서 로드      │
+# └─────────────────────────────────────────────────────────────┘
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  loki-datasource.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.logging.svc.cluster.local
+      isDefault: false
+      version: 1
+      editable: true
+EOF
+
 
 echo '======== [8] Sealed Secrets (GitOps Secret 암호화) 설치 ========'
 helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
@@ -230,21 +371,20 @@ install -m 755 kubeseal /usr/local/bin/kubeseal
 rm -f kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
 
 
-echo '======== [9] Argo CD v3.3.3 설치 ========'
-kubectl create namespace argocd || true
-kubectl apply -n argocd --server-side --force-conflicts \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.3/manifests/install.yaml
-
-echo '======== [9-1] ArgoCD insecure 모드 (TLS 비활성화 → HTTP:80) ========'
-kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge \
-  -p '{"data":{"server.insecure":"true"}}'
-kubectl rollout restart deployment argocd-server -n argocd
-kubectl rollout status deployment argocd-server -n argocd --timeout=300s
+echo '======== [9] Argo CD 설치 (Helm) ========'
+helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
+helm repo update
+helm upgrade --install argocd argo/argo-cd \
+  --create-namespace --namespace argocd \
+  --set configs.params."server\.insecure"=true \
+  --wait --timeout 600s
 
 
-echo '======== [10] Argo CD Image Updater 설치 ========'
-kubectl apply -n argocd \
-  -f https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/config/install.yaml
+echo "======== [10] Argo CD Image Updater 설치 (Helm, v${ARGOCD_IMAGE_UPDATER_VERSION}) ========"
+helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+  --namespace argocd \
+  --version ${ARGOCD_IMAGE_UPDATER_VERSION} \
+  --wait --timeout 300s
 
 
 echo '======== [11] HTTPRoute 도메인 라우팅 설정 ========'
@@ -344,24 +484,37 @@ spec:
       port: 80
 EOF
 
-echo '======== [11-6] Gateway External IP 확인 ========'
-echo '  MetalLB IP 할당 대기 중...'
-for i in $(seq 1 30); do
-  GW_IP=$(kubectl get gateway eg -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
-  if [ -n "$GW_IP" ]; then
-    echo "  Gateway External IP: $GW_IP"
-    break
-  fi
-  sleep 5
-done
 
-if [ -z "$GW_IP" ]; then
-  echo '  [경고] Gateway에 IP가 아직 할당되지 않았습니다.'
-  echo '  kubectl get gateway eg 으로 확인하세요.'
-  GW_IP="<GATEWAY_IP>"
+# ============================================================
+# Gateway/접속 IP 확정
+# ============================================================
+if [ "$IS_OCI" = false ]; then
+  # [일반 서버] MetalLB가 할당한 Gateway IP 대기
+  echo '======== [11-6] Gateway External IP 확인 (MetalLB) ========'
+  echo '  MetalLB IP 할당 대기 중...'
+  for i in $(seq 1 30); do
+    GATEWAY_IP=$(kubectl get gateway eg -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
+    if [ -n "$GATEWAY_IP" ]; then
+      echo "  ✓ Gateway External IP: $GATEWAY_IP"
+      break
+    fi
+    sleep 5
+  done
+  if [ -z "$GATEWAY_IP" ]; then
+    echo '  [경고] Gateway에 IP가 아직 할당되지 않았습니다.'
+    echo '  kubectl get gateway eg 으로 확인하세요.'
+    GATEWAY_IP="<GATEWAY_IP>"
+  fi
+
+else
+  # [OCI] Public IP가 접속 IP
+  GATEWAY_IP="$PUBLIC_IP"
 fi
 
 
+# ============================================================
+# 완료 메시지
+# ============================================================
 echo ''
 echo '============================================================'
 echo '  전체 스택 + HTTPRoute 설정 완료!'
@@ -372,16 +525,32 @@ echo ''
 echo '      # Linux/Mac: /etc/hosts'
 echo '      # Windows: C:\Windows\System32\drivers\etc\hosts'
 echo ''
-echo "      $GW_IP  grafana.local"
-echo "      $GW_IP  prometheus.local"
-echo "      $GW_IP  argocd.local"
-echo "      $GW_IP  dashboard.local"
+echo "      $GATEWAY_IP  grafana.local"
+echo "      $GATEWAY_IP  prometheus.local"
+echo "      $GATEWAY_IP  argocd.local"
+echo "      $GATEWAY_IP  dashboard.local"
 echo ''
-echo '  [2] 브라우저 접속'
-echo '      Grafana      http://grafana.local       (admin / admin1234)'
-echo '      Prometheus   http://prometheus.local     (인증 없음)'
-echo '      ArgoCD       http://argocd.local         (admin / 아래 명령어로 확인)'
-echo '      Headlamp     http://dashboard.local      (토큰 로그인)'
+
+if [ "$IS_OCI" = false ]; then
+  # [일반 서버] 포트 없이 http://도메인 접속
+  echo '  [2] 브라우저 접속'
+  echo '      Grafana      http://grafana.local       (admin / admin1234)'
+  echo '      Prometheus   http://prometheus.local     (인증 없음)'
+  echo '      ArgoCD       http://argocd.local         (admin / 아래 명령어로 확인)'
+  echo '      Headlamp     http://dashboard.local      (토큰 로그인)'
+else
+  # ┌─────────────────────────────────────────────────────────┐
+  # │ [OCI] NodePort 30080으로 접속                            │
+  # │  흐름: 브라우저 → OCI Public IP:30080                   │
+  # │         → OCI NAT → Private IP:30080                    │
+  # │         → Envoy Gateway → HTTPRoute → Pod               │
+  # └─────────────────────────────────────────────────────────┘
+  echo '  [2] 브라우저 접속 [OCI: NodePort 30080 사용]'
+  echo '      Grafana      http://grafana.local:30080       (admin / admin1234)'
+  echo '      Prometheus   http://prometheus.local:30080     (인증 없음)'
+  echo '      ArgoCD       http://argocd.local:30080         (admin / 아래 명령어로 확인)'
+  echo '      Headlamp     http://dashboard.local:30080      (토큰 로그인)'
+fi
 echo ''
 echo '  [3] ArgoCD 초기 비밀번호'
 echo '      kubectl -n argocd get secret argocd-initial-admin-secret \'
@@ -390,8 +559,9 @@ echo ''
 echo '  [4] Headlamp 로그인 토큰'
 echo '      kubectl -n headlamp create token headlamp'
 echo ''
-echo '  [5] Grafana에서 Loki 데이터소스 추가'
-echo '      Connections → Data Sources → Add → Loki'
+echo '  [5] Grafana Loki 데이터소스'
+echo '      ConfigMap 자동 프로비저닝으로 등록됨 (수동 추가 불필요)'
+echo '      확인: Grafana → Connections → Data Sources → Loki'
 echo '      URL: http://loki-gateway.logging.svc.cluster.local'
 echo ''
 echo '  [6] HTTPRoute 상태 확인'
