@@ -12,13 +12,24 @@ echo '======== [1-2] 타임존 설정 및 동기화========'
 timedatectl set-timezone Asia/Seoul
 timedatectl set-ntp true
 
-echo '======== [1-3] Disk 확장 설정 ========'
-yum install -y cloud-utils-growpart
-growpart /dev/sda 4
-xfs_growfs /dev/sda4
+#echo '======== [1-3] Disk 확장 설정 (VM일경우만 실행)========'
+#yum install -y cloud-utils-growpart
+#growpart /dev/sda 4
+#xfs_growfs /dev/sda4
 
 echo '======== [1-4] 방화벽 해제 ========'
 systemctl stop firewalld && systemctl disable firewalld
+
+#echo '======== [1-4-1] 방화벽 다시 설정 ========'
+#systemctl enable firewalld && systemctl start firewalld
+
+#echo '======== [1-4-2] 특정포트 해제 ========'
+# k3s에 필요한 주요 포트
+#firewall-cmd --permanent --add-port=6443/tcp   # API server
+#firewall-cmd --permanent --add-port=10250/tcp  # kubelet
+#firewall-cmd --permanent --add-port=8472/udp   # VXLAN (Flannel)
+#firewall-cmd --permanent --add-port=30000-32767/tcp  # NodePort 범위
+#firewall-cmd --reload
 
 
 echo '======== [3] 도커 설치 ========'
