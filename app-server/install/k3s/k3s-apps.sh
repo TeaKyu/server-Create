@@ -10,8 +10,8 @@ set -e
 # │              ★ 설정 구간 — 여기만 수정하세요 ★               │
 # └─────────────────────────────────────────────────────────────┘
 
-# ─── [일반 서버] MetalLB IP 풀 ───────────────────────────────
-# IS_OCI=false 일 때만 사용. 서버 서브넷의 미사용 IP 대역 입력.
+# ─── [NAT 미사용] MetalLB IP 풀 ──────────────────────────────
+# USE_NAT=false 일 때만 사용. 서버 서브넷의 미사용 IP 대역 입력.
 # DHCP 범위, 서버 IP와 겹치지 않아야 함.
 METALLB_IP_START="192.168.1.200"   # ← 환경에 맞게 변경
 METALLB_IP_END="192.168.1.220"     # ← 환경에 맞게 변경
@@ -49,16 +49,15 @@ else
   exit 1
 fi
 
-if [ "$IS_OCI" = true ]; then
-  # ┌─────────────────────────────────────────────────────────┐
-  # │ [OCI 전용] MetalLB 미사용                               │
-  # │  OCI Free Tier는 외부 LB가 없으므로                     │
-  # │  MetalLB → NodePort + Public IP 직접 접근으로 대체      │
-  # │  Envoy Gateway 서비스를 NodePort 30080으로 패치함        │
-  # └─────────────────────────────────────────────────────────┘
-  echo "  [OCI] Private IP: $PRIVATE_IP"
-  echo "  [OCI] Public IP:  $PUBLIC_IP"
-  echo "  [OCI] 접속: http://<도메인>:30080"
+if [ "$USE_NAT" = true ]; then
+  echo "  [NAT 사용] Private IP: $PRIVATE_IP"
+  if [ -n "$EXTERNAL_IP" ]; then
+    echo "  [NAT 사용] External IP: $EXTERNAL_IP"
+    echo "  [NAT 사용] 외부 접속: http://<도메인>:30080"
+  else
+    echo '  [NAT 사용] External IP: 아직 미확인'
+    echo "  [NAT 사용] 내부 접속: http://${PRIVATE_IP}:30080"
+  fi
   echo ''
 fi
 
@@ -76,12 +75,8 @@ helm version
 # ============================================================
 # [2] LoadBalancer 구성 (환경별 분기)
 # ============================================================
-if [ "$IS_OCI" = false ]; then
-  # ─────────────────────────────────────────────────────────────
-  # [일반 서버] MetalLB 설치 — 온프레미스 LoadBalancer
-  #   Envoy Gateway가 External IP를 받으려면 MetalLB가 필요
-  # ─────────────────────────────────────────────────────────────
-  echo '======== [2] MetalLB 설치 (온프레미스 LoadBalancer) ========'
+if [ "$USE_NAT" = false ]; then
+  echo '======== [2] MetalLB 설치 (NAT 미사용 환경) ========'
   helm repo add metallb https://metallb.github.io/metallb
   helm repo update
   helm upgrade --install metallb metallb/metallb \
@@ -115,18 +110,12 @@ spec:
 EOF
 
 else
-  # ┌─────────────────────────────────────────────────────────┐
-  # │ [OCI 전용] MetalLB 설치 건너뜀                           │
-  # │  OCI Free Tier는 실제 외부 LB와 연동 불가               │
-  # │  → Envoy Gateway를 NodePort로 직접 노출                 │
-  # └─────────────────────────────────────────────────────────┘
-  echo '======== [2] [OCI] MetalLB 건너뜀 → NodePort 방식 사용 ========'
-  echo '  OCI Free Tier는 외부 LB 연동이 없으므로 NodePort를 사용합니다.'
+  echo '======== [2] [NAT 사용] MetalLB 건너뜀 → NodePort 방식 사용 ========'
+  echo '  외부 진입은 NAT + NodePort 30080 경로를 사용합니다.'
 fi
 
 
 echo "======== [3] Envoy Gateway (Gateway API) 설치 — ${ENVOY_GATEWAY_VERSION} ========"
-# OCI 레지스트리에서 직접 설치 — helm repo add/update 불필요
 helm install eg oci://docker.io/envoyproxy/gateway-helm \
   --version ${ENVOY_GATEWAY_VERSION} \
   -n envoy-gateway-system \
@@ -161,18 +150,8 @@ spec:
         from: All
 EOF
 
-if [ "$IS_OCI" = true ]; then
-  # ┌─────────────────────────────────────────────────────────┐
-  # │ [OCI 전용] Envoy Gateway 서비스 → NodePort 패치          │
-  # │                                                         │
-  # │  흐름: 외부 브라우저                                     │
-  # │         → OCI Public IP:30080                           │
-  # │         → OCI NAT                                       │
-  # │         → Private IP:30080 (NodePort)                   │
-  # │         → Envoy Gateway Pod                             │
-  # │         → HTTPRoute → 서비스 → Pod                      │
-  # └─────────────────────────────────────────────────────────┘
-  echo '======== [3-3] [OCI] Envoy Gateway → NodePort 30080 패치 ========'
+if [ "$USE_NAT" = true ]; then
+  echo '======== [3-3] [NAT 사용] Envoy Gateway → NodePort 30080 패치 ========'
   sleep 15  # envoy 서비스 생성 대기
   ENVOY_SVC=$(kubectl get svc -n envoy-gateway-system \
     -l gateway.envoyproxy.io/owning-gateway-name=eg \
@@ -379,6 +358,16 @@ helm upgrade --install argocd argo/argo-cd \
   --set configs.params."server\.insecure"=true \
   --wait --timeout 600s
 
+echo '======== [9-1] Argo CD 기본 로그인 비밀번호 admin 으로 고정 ========'
+kubectl rollout status deployment argocd-server -n argocd --timeout=300s
+ARGOCD_ADMIN_HASH=$(kubectl -n argocd exec deploy/argocd-server -- \
+  argocd account bcrypt --password 'admin')
+kubectl -n argocd patch secret argocd-secret --type merge \
+  -p "{\"stringData\":{\"admin.password\":\"$ARGOCD_ADMIN_HASH\",\"admin.passwordMtime\":\"$(date -u +%FT%TZ)\"}}"
+kubectl -n argocd delete secret argocd-initial-admin-secret --ignore-not-found=true
+kubectl rollout restart deployment argocd-server -n argocd
+kubectl rollout status deployment argocd-server -n argocd --timeout=300s
+
 
 echo "======== [10] Argo CD Image Updater 설치 (Helm, v${ARGOCD_IMAGE_UPDATER_VERSION}) ========"
 helm upgrade --install argocd-image-updater argo/argocd-image-updater \
@@ -488,8 +477,7 @@ EOF
 # ============================================================
 # Gateway/접속 IP 확정
 # ============================================================
-if [ "$IS_OCI" = false ]; then
-  # [일반 서버] MetalLB가 할당한 Gateway IP 대기
+if [ "$USE_NAT" = false ]; then
   echo '======== [11-6] Gateway External IP 확인 (MetalLB) ========'
   echo '  MetalLB IP 할당 대기 중...'
   for i in $(seq 1 30); do
@@ -507,8 +495,11 @@ if [ "$IS_OCI" = false ]; then
   fi
 
 else
-  # [OCI] Public IP가 접속 IP
-  GATEWAY_IP="$PUBLIC_IP"
+  if [ -n "$EXTERNAL_IP" ]; then
+    GATEWAY_IP="$EXTERNAL_IP"
+  else
+    GATEWAY_IP="$PRIVATE_IP"
+  fi
 fi
 
 
@@ -531,30 +522,27 @@ echo "      $GATEWAY_IP  argocd.local"
 echo "      $GATEWAY_IP  dashboard.local"
 echo ''
 
-if [ "$IS_OCI" = false ]; then
-  # [일반 서버] 포트 없이 http://도메인 접속
+if [ "$USE_NAT" = false ]; then
   echo '  [2] 브라우저 접속'
   echo '      Grafana      http://grafana.local       (admin / admin1234)'
   echo '      Prometheus   http://prometheus.local     (인증 없음)'
-  echo '      ArgoCD       http://argocd.local         (admin / 아래 명령어로 확인)'
+  echo '      ArgoCD       http://argocd.local         (admin / admin)'
   echo '      Headlamp     http://dashboard.local      (토큰 로그인)'
 else
-  # ┌─────────────────────────────────────────────────────────┐
-  # │ [OCI] NodePort 30080으로 접속                            │
-  # │  흐름: 브라우저 → OCI Public IP:30080                   │
-  # │         → OCI NAT → Private IP:30080                    │
-  # │         → Envoy Gateway → HTTPRoute → Pod               │
-  # └─────────────────────────────────────────────────────────┘
-  echo '  [2] 브라우저 접속 [OCI: NodePort 30080 사용]'
+  if [ -n "$EXTERNAL_IP" ]; then
+    echo '  [2] 브라우저 접속 [NAT 사용: 외부 IP + NodePort 30080]'
+  else
+    echo '  [2] 브라우저 접속 [NAT 사용: 내부/private IP + NodePort 30080]'
+    echo '      External IP를 아직 모르므로 외부 인터넷 접속 안내는 생략합니다.'
+  fi
   echo '      Grafana      http://grafana.local:30080       (admin / admin1234)'
   echo '      Prometheus   http://prometheus.local:30080     (인증 없음)'
-  echo '      ArgoCD       http://argocd.local:30080         (admin / 아래 명령어로 확인)'
+  echo '      ArgoCD       http://argocd.local:30080         (admin / admin)'
   echo '      Headlamp     http://dashboard.local:30080      (토큰 로그인)'
 fi
 echo ''
-echo '  [3] ArgoCD 초기 비밀번호'
-echo '      kubectl -n argocd get secret argocd-initial-admin-secret \'
-echo '        -o jsonpath="{.data.password}" | base64 -d; echo'
+echo '  [3] ArgoCD 기본 로그인'
+echo '      admin / admin'
 echo ''
 echo '  [4] Headlamp 로그인 토큰'
 echo '      kubectl -n headlamp create token headlamp'
