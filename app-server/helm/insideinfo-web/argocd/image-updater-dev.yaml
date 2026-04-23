@@ -1,0 +1,25 @@
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: insideinfo-web-dev-updater
+  namespace: argocd
+spec:
+  commonUpdateSettings:
+    pullSecret: pullsecret:argocd/gitlab-registry-secret
+    updateStrategy: newest-build
+    forceUpdate: true
+    allowTags: "regexp:^dev-[0-9]{8}-[0-9]{4}$"
+  writeBackConfig:
+    method: git
+    gitConfig:
+      branch: dev
+      writeBackTarget: "helmvalues:./values/dev/inside-web-values.yaml"
+  applicationRefs:
+    - namePattern: "insideinfo-web-dev"
+      images:
+        - alias: web
+          imageName: gitlab.insideinfo.co.kr:5005/ax-2/insideinfo-web/insideinfo-web
+          manifestTargets:
+            helm:
+              name: image.repository
+              tag: image.tag

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: insideinfo-web
+description: Helm chart for insideinfo Web (Next.js 15 / Node 22)
+type: application
+version: 0.1.0
+appVersion: "latest"

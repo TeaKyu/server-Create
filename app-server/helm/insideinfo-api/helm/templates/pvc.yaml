@@ -1,0 +1,16 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.persistence.pvcName }}
+  labels:
+    {{- include "insideinfo-api.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.storageSize }}
+  volumeName: {{ .Values.persistence.pvName }}
+  storageClassName: ""
+{{- end }}

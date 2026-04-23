@@ -1,0 +1,27 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.persistence.pvName }}
+  labels:
+    {{- include "insideinfo-api.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .Values.persistence.storageSize }}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ .Values.persistence.hostPath }}
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                {{- range .Values.persistence.nodeNames }}
+                - {{ . }}
+                {{- end }}
+{{- end }}

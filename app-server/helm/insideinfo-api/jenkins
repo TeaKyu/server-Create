@@ -1,0 +1,56 @@
+pipeline {
+    agent any
+    tools {
+        gradle 'gradle-8.14'
+        jdk 'jdk-21'
+    }
+    parameters {
+        // dev / main 둘 다 Image Updater 가 자동 감지 (dev-* / prod-* 태그로 구분)
+        choice(name: 'BRANCH', choices: ['dev', 'main'], description: '빌드할 브랜치를 선택하세요')
+    }
+    environment {
+        REGISTRY_URL = "gitlab.insideinfo.co.kr:5005"
+        IMAGE_PATH   = "ax-2/insideinfo-api"
+        IMAGE_NAME   = "${REGISTRY_URL}/${IMAGE_PATH}/insideinfo-api"
+        CHECKOUT_URL = "http://gitlab.insideinfo.co.kr/ax-2/insideinfo-api.git"
+    }
+    stages {
+        stage('Source Build') {
+            steps {
+                sh "git config --global http.sslVerify false"
+                git branch: "${params.BRANCH}",
+                url: "${CHECKOUT_URL}", credentialsId: 'gitlab-backend'
+                sh "chmod +x ./gradlew"
+                sh "gradle clean build"
+                sh "cp ./build/libs/*.jar ./"
+                script {
+                    def envPrefix = params.BRANCH == 'main' ? 'prod' : 'dev'
+                    env.VERSION = "${envPrefix}-" + new Date().format("yyyyMMdd-HHmm")
+                }
+            }
+        }
+        stage('Docker Image Build & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'gitlab-backend', passwordVariable: 'GIT_TOKEN', usernameVariable:
+'GIT_USER')]){
+                    script {
+                        sh "echo \$GIT_TOKEN | docker login ${REGISTRY_URL} -u \$GIT_USER --password-stdin"
+
+                        sh "docker build -t ${IMAGE_NAME}:${env.VERSION} ."
+                        sh "docker push ${IMAGE_NAME}:${env.VERSION}"
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                sh "docker logout ${REGISTRY_URL} || true"
+                sh "docker rmi ${IMAGE_NAME}:${env.VERSION} || true"
+                sh "docker image prune -f || true"
+                sh "rm -f *.jar"
+            }
+        }
+    }
+}

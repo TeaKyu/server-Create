@@ -34,7 +34,7 @@ METALLB_IP_END="192.168.1.220"     # ← 환경에 맞게 변경
 ENVOY_GATEWAY_VERSION="v1.7.1"
 HEADLAMP_VERSION="v0.41.0"
 LOKI_CHART_VERSION="6.29.0"
-ARGOCD_IMAGE_UPDATER_VERSION="0.14.0"
+ARGOCD_IMAGE_UPDATER_VERSION="1.1.5"
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export PATH=$PATH:/usr/local/bin
@@ -110,8 +110,9 @@ spec:
 EOF
 
 else
-  echo '======== [2] [NAT 사용] MetalLB 건너뜀 → NodePort 방식 사용 ========'
-  echo '  외부 진입은 NAT + NodePort 30080 경로를 사용합니다.'
+  echo '======== [2] [NAT 사용] MetalLB 건너뜀 → ServiceLB 방식 사용 ========'
+  echo '  k3s 내장 ServiceLB가 Envoy Gateway에 노드 IP를 External IP로 할당합니다.'
+  echo '  공유기에서 외부 80/443 → 서버 80/443 포트포워딩이 필요합니다.'
 fi
 
 
@@ -151,21 +152,31 @@ spec:
 EOF
 
 if [ "$USE_NAT" = true ]; then
-  echo '======== [3-3] [NAT 사용] Envoy Gateway → NodePort 30080 패치 ========'
+  echo '======== [3-3] [NAT 사용] Envoy Gateway ServiceLB External IP 대기 ========'
+  # ServiceLB(Klipper)가 LoadBalancer 서비스에 노드 IP를 자동 할당
+  # NodePort 패치 불필요 — 표준 포트 80/443으로 직접 바인딩됨
   sleep 15  # envoy 서비스 생성 대기
   ENVOY_SVC=$(kubectl get svc -n envoy-gateway-system \
     -l gateway.envoyproxy.io/owning-gateway-name=eg \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 
   if [ -n "$ENVOY_SVC" ]; then
-    kubectl patch svc "$ENVOY_SVC" -n envoy-gateway-system --type merge \
-      -p '{"spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30080,"protocol":"TCP"}]}}'
-    echo "  ✓ Envoy Service ($ENVOY_SVC) → NodePort 30080 패치 완료"
+    for i in $(seq 1 20); do
+      EXT_IP=$(kubectl get svc "$ENVOY_SVC" -n envoy-gateway-system \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+      if [ -n "$EXT_IP" ]; then
+        echo "  ✓ Envoy Service ($ENVOY_SVC) → External IP: $EXT_IP (포트 80/443)"
+        break
+      fi
+      sleep 3
+    done
+    if [ -z "$EXT_IP" ]; then
+      echo "  ✓ Envoy Service ($ENVOY_SVC) → LoadBalancer 준비 중 (IP 할당 대기)"
+      echo '  kubectl get svc -n envoy-gateway-system 으로 확인하세요.'
+    fi
   else
-    echo '  [경고] Envoy 서비스를 찾지 못했습니다. 수동 패치 필요:'
-    echo '  kubectl get svc -n envoy-gateway-system'
-    echo '  kubectl patch svc <svc-name> -n envoy-gateway-system --type merge \'
-    echo '    -p '"'"'{"spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30080,"protocol":"TCP"}]}}'"'"
+    echo '  [경고] Envoy 서비스를 찾지 못했습니다.'
+    echo '  kubectl get svc -n envoy-gateway-system 으로 확인하세요.'
   fi
 fi
 
@@ -335,30 +346,87 @@ data:
 EOF
 
 
-echo '======== [8] Sealed Secrets (GitOps Secret 암호화) 설치 ========'
-helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-helm repo update
-helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets \
-  --create-namespace --namespace kube-system \
-  --set-string fullnameOverride=sealed-secrets-controller
-
-echo '======== [8-1] kubeseal CLI 설치 ========'
-KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-curl -OL "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
-tar -xvzf kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
-install -m 755 kubeseal /usr/local/bin/kubeseal
-rm -f kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
+# [8] Sealed Secrets — SOPS로 대체하여 더 이상 사용하지 않음 (06-SOPS 가이드 참고)
+# helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+# helm repo update
+# helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets \
+#   --create-namespace --namespace kube-system \
+#   --set-string fullnameOverride=sealed-secrets-controller
+# KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+# curl -OL "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+# tar -xvzf kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
+# install -m 755 kubeseal /usr/local/bin/kubeseal
+# rm -f kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
 
 
-echo '======== [9] Argo CD 설치 (Helm) ========'
+echo '======== [8] Argo CD 설치 (Helm + SOPS 시크릿 복호화) ========'
 helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
 helm repo update
+
+cat > /tmp/argocd-values.yaml << 'ARGOEOF'
+configs:
+  params:
+    server.insecure: true
+
+repoServer:
+  env:
+    - name: SOPS_AGE_KEY_FILE
+      value: /app/config/age/keys.txt
+    - name: HELM_PLUGINS
+      value: /custom-tools/helm-plugins
+
+  volumes:
+    - name: sops-age
+      secret:
+        secretName: sops-age
+    - name: custom-tools
+      emptyDir: {}
+
+  volumeMounts:
+    - name: sops-age
+      mountPath: /app/config/age
+    - name: custom-tools
+      mountPath: /usr/local/bin/sops
+      subPath: sops
+    - name: custom-tools
+      mountPath: /custom-tools/helm-plugins
+      subPath: helm-plugins
+
+  initContainers:
+    - name: install-sops
+      image: alpine:3.20
+      command:
+        - sh
+        - -c
+        - |
+          wget -qO /custom-tools/sops \
+            https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.amd64 \
+          && chmod +x /custom-tools/sops
+      volumeMounts:
+        - name: custom-tools
+          mountPath: /custom-tools
+    - name: install-helm-secrets
+      image: alpine/helm:3.16.4
+      command:
+        - sh
+        - -c
+        - |
+          helm plugin install https://github.com/jkroepke/helm-secrets --version v4.6.2 \
+          && PDIR=/root/.local/share/helm/plugins/helm-secrets \
+          && printf 'name: "secrets"\nversion: "4.6.2"\nusage: "Secrets encryption in Helm for Git storing"\ndescription: "This plugin provides secrets values encryption for Helm charts secure storing"\nuseTunnel: false\ncommand: "$HELM_PLUGIN_DIR/scripts/run.sh"\ndownloaders:\n  - command: "scripts/run.sh downloader"\n    protocols:\n      - "secrets"\n      - "secrets+gpg-import"\n      - "secrets+gpg-import-kubernetes"\n      - "secrets+age-import"\n      - "secrets+age-import-kubernetes"\n      - "secrets+literal"\n' > $PDIR/plugin.yaml \
+          && cp -r /root/.local/share/helm/plugins/* /custom-tools/helm-plugins/
+      volumeMounts:
+        - name: custom-tools
+          mountPath: /custom-tools/helm-plugins
+          subPath: helm-plugins
+ARGOEOF
+
 helm upgrade --install argocd argo/argo-cd \
   --create-namespace --namespace argocd \
-  --set configs.params."server\.insecure"=true \
+  -f /tmp/argocd-values.yaml \
   --wait --timeout 600s
 
-echo '======== [9-1] Argo CD 기본 로그인 비밀번호 admin 으로 고정 ========'
+echo '======== [8-1] Argo CD 기본 로그인 비밀번호 admin 으로 고정 ========'
 kubectl rollout status deployment argocd-server -n argocd --timeout=300s
 ARGOCD_ADMIN_HASH=$(kubectl -n argocd exec deploy/argocd-server -- \
   argocd account bcrypt --password 'admin')
@@ -368,17 +436,27 @@ kubectl -n argocd delete secret argocd-initial-admin-secret --ignore-not-found=t
 kubectl rollout restart deployment argocd-server -n argocd
 kubectl rollout status deployment argocd-server -n argocd --timeout=300s
 
+echo '======== [8-2] Argo CD helm.valuesFileSchemes 설정 (secrets:// 스킴 허용) ========'
+# ┌─────────────────────────────────────────────────────────────┐
+# │ helm-secrets의 secrets:// 프로토콜을 ArgoCD가 허용하도록 설정  │
+# │ 미설정 시 "URL scheme 'secrets' is not allowed" 에러 발생     │
+# └─────────────────────────────────────────────────────────────┘
+kubectl patch configmap argocd-cm -n argocd --type merge \
+  -p '{"data":{"helm.valuesFileSchemes": "secrets,secrets+gpg-import,secrets+gpg-import-kubernetes,secrets+age-import,secrets+age-import-kubernetes,secrets+literal,https,http"}}'
+kubectl rollout restart deployment argocd-repo-server -n argocd
+kubectl rollout status deployment argocd-repo-server -n argocd --timeout=120s
 
-echo "======== [10] Argo CD Image Updater 설치 (Helm, v${ARGOCD_IMAGE_UPDATER_VERSION}) ========"
+
+echo "======== [9] Argo CD Image Updater 설치 (Helm, v${ARGOCD_IMAGE_UPDATER_VERSION}) ========"
 helm upgrade --install argocd-image-updater argo/argocd-image-updater \
   --namespace argocd \
   --version ${ARGOCD_IMAGE_UPDATER_VERSION} \
   --wait --timeout 300s
 
 
-echo '======== [11] HTTPRoute 도메인 라우팅 설정 ========'
+echo '======== [10] HTTPRoute 도메인 라우팅 설정 ========'
 
-echo '======== [11-1] ReferenceGrant (cross-namespace 접근 허용) ========'
+echo '======== [10-1] ReferenceGrant (cross-namespace 접근 허용) ========'
 for NS in monitoring argocd headlamp; do
 cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1beta1
@@ -397,7 +475,7 @@ spec:
 EOF
 done
 
-echo '======== [11-2] Grafana (grafana.local → HTTP:80) ========'
+echo '======== [10-2] Grafana (grafana.local → HTTP:80) ========'
 cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -416,7 +494,7 @@ spec:
       port: 80
 EOF
 
-echo '======== [11-3] Prometheus (prometheus.local → HTTP:9090) ========'
+echo '======== [10-3] Prometheus (prometheus.local → HTTP:9090) ========'
 cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -435,7 +513,7 @@ spec:
       port: 9090
 EOF
 
-echo '======== [11-4] ArgoCD (argocd.local → HTTP:80) ========'
+echo '======== [10-4] ArgoCD (argocd.local → HTTP:80) ========'
 cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -454,7 +532,7 @@ spec:
       port: 80
 EOF
 
-echo '======== [11-5] Headlamp (dashboard.local → HTTP:80) ========'
+echo '======== [10-5] Headlamp (dashboard.local → HTTP:80) ========'
 cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -478,7 +556,7 @@ EOF
 # Gateway/접속 IP 확정
 # ============================================================
 if [ "$USE_NAT" = false ]; then
-  echo '======== [11-6] Gateway External IP 확인 (MetalLB) ========'
+  echo '======== [10-6] Gateway External IP 확인 (MetalLB) ========'
   echo '  MetalLB IP 할당 대기 중...'
   for i in $(seq 1 30); do
     GATEWAY_IP=$(kubectl get gateway eg -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
@@ -495,10 +573,19 @@ if [ "$USE_NAT" = false ]; then
   fi
 
 else
-  if [ -n "$EXTERNAL_IP" ]; then
-    GATEWAY_IP="$EXTERNAL_IP"
-  else
-    GATEWAY_IP="$PRIVATE_IP"
+  # ServiceLB가 노드 IP를 External IP로 할당 → Gateway status에서 읽기
+  echo '======== [10-6] Gateway External IP 확인 (ServiceLB) ========'
+  for i in $(seq 1 20); do
+    GATEWAY_IP=$(kubectl get gateway eg -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
+    if [ -n "$GATEWAY_IP" ]; then
+      echo "  ✓ Gateway IP (ServiceLB): $GATEWAY_IP"
+      break
+    fi
+    sleep 3
+  done
+  if [ -z "$GATEWAY_IP" ]; then
+    GATEWAY_IP="${EXTERNAL_IP:-$PRIVATE_IP}"
+    echo "  [참고] Gateway IP 자동 확인 실패 → 서버 IP 사용: $GATEWAY_IP"
   fi
 fi
 
@@ -530,15 +617,19 @@ if [ "$USE_NAT" = false ]; then
   echo '      Headlamp     http://dashboard.local      (토큰 로그인)'
 else
   if [ -n "$EXTERNAL_IP" ]; then
-    echo '  [2] 브라우저 접속 [NAT 사용: 외부 IP + NodePort 30080]'
+    echo '  [2] 브라우저 접속 [NAT 사용: 공유기 포트포워딩 필요 (외부 80/443 → 서버 80/443)]'
   else
-    echo '  [2] 브라우저 접속 [NAT 사용: 내부/private IP + NodePort 30080]'
+    echo '  [2] 브라우저 접속 [NAT 사용: ServiceLB, 공유기 포트포워딩 설정 필요]'
     echo '      External IP를 아직 모르므로 외부 인터넷 접속 안내는 생략합니다.'
   fi
-  echo '      Grafana      http://grafana.local:30080       (admin / admin1234)'
-  echo '      Prometheus   http://prometheus.local:30080     (인증 없음)'
-  echo '      ArgoCD       http://argocd.local:30080         (admin / admin)'
-  echo '      Headlamp     http://dashboard.local:30080      (토큰 로그인)'
+  echo '      Grafana      http://grafana.local       (admin / admin1234)'
+  echo '      Prometheus   http://prometheus.local     (인증 없음)'
+  echo '      ArgoCD       http://argocd.local         (admin / admin)'
+  echo '      Headlamp     http://dashboard.local      (토큰 로그인)'
+  echo ''
+  echo '  [포트포워딩] 공유기에서 아래 설정 필요:'
+  echo "      외부 80  → $GATEWAY_IP:80"
+  echo "      외부 443 → $GATEWAY_IP:443"
 fi
 echo ''
 echo '  [3] ArgoCD 기본 로그인'

@@ -1,0 +1,50 @@
+# values.yaml (빈 기본값 — 환경별 values 파일이 오버라이드)
+replicaCount: 1
+image:
+  repository: ""
+  pullPolicy: ""
+  tag: ""
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: false
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 80
+httproute:
+  enabled: false
+  gatewayName: eg
+  gatewayNamespace: default
+  hostnames: []
+resources: {}
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+volumes: []
+volumeMounts: []
+
+persistence:
+  enabled: false
+  hostPath: ""
+  storageSize: 10Gi
+  pvName: ""
+  pvcName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+configmap:
+  data:
+    properties: {}
+secret:
+  data:
+    postgresql: {}

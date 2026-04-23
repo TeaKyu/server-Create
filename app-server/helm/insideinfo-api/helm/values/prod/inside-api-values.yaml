@@ -1,0 +1,67 @@
+replicaCount: 1
+image:
+  repository: gitlab.insideinfo.co.kr:5005/ax-2/insideinfo-api/insideinfo-api
+  pullPolicy: Always
+  tag: "prod-20260416-1117"
+fullnameOverride: insideinfo-api-prod
+imagePullSecrets:
+- name: gitlab-registry-secret
+serviceAccount:
+  create: false
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+httproute:
+  enabled: true
+  gatewayName: eg
+  gatewayNamespace: default
+  hostnames:
+  - prod.insideinfo.api
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "2Gi"
+    cpu: "2000m"
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+volumes:
+- name: secret-config
+  secret:
+    secretName: insideinfo-api-prod-config
+- name: upload-files
+  persistentVolumeClaim:
+    claimName: insideinfo-api-prod-upload-pvc
+volumeMounts:
+- name: secret-config
+  mountPath: /app/config
+- name: upload-files
+  mountPath: /app/upload/file
+persistence:
+  enabled: true
+  hostPath: /home/insideHomepage/upload/prod/file
+  storageSize: 20Gi
+  pvName: insideinfo-api-prod-upload-pv
+  pvcName: insideinfo-api-prod-upload-pvc
+  nodeNames:
+  - hompage-prod # 실제 노드 hostname 으로 변경 필요
+nodeSelector: {}
+tolerations: []
+affinity: {}
+configmap:
+  data:
+    properties:
+      SPRING_PROFILES_ACTIVE: "prod"
+      TZ: "Asia/Seoul"

@@ -1,0 +1,49 @@
+replicaCount: 1
+image:
+  repository: gitlab.insideinfo.co.kr:5005/ax-2/insideinfo-web/insideinfo-web
+  pullPolicy: Always
+  tag: "prod-20260415-1456"
+fullnameOverride: insideinfo-web-prod
+imagePullSecrets:
+- name: gitlab-registry-secret
+serviceAccount:
+  create: false
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+httproute:
+  enabled: true
+  gatewayName: eg
+  gatewayNamespace: default
+  hostnames:
+  - prod.insideinfo
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "1Gi"
+    cpu: "500m"
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+volumes: []
+volumeMounts: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+configmap:
+  data:
+    properties:
+      NEXT_PUBLIC_API_URL: "http://insideinfo-api-prod:8080"
+      PORT: "3000"

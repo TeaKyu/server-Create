@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: insideinfo-web-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.insideinfo.co.kr/ax-2/insideinfo-gitops.git
+    targetRevision: dev
+    path: apps/insideinfo-web/helm
+    helm:
+      valueFiles:
+        - values/dev/inside-web-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: insideinfo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

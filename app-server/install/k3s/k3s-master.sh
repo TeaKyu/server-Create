@@ -83,12 +83,13 @@ if [ "$USE_NAT" = false ]; then
     --disable servicelb \
     --write-kubeconfig-mode 644
 else
+  # NAT 환경: ServiceLB 활성화 (k3s 내장 LB, 노드 IP를 External IP로 할당)
+  # MetalLB 대신 ServiceLB를 사용하므로 --disable servicelb 제거
   set -- server \
     --node-ip "$PRIVATE_IP" \
     --advertise-address "$PRIVATE_IP" \
     --tls-san "$PRIVATE_IP" \
     --disable traefik \
-    --disable servicelb \
     --write-kubeconfig-mode 644
 
   if [ -n "$EXTERNAL_IP" ]; then
